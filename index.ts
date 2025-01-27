@@ -1,78 +1,47 @@
-import { serve } from "https://deno.land/std@0.182.0/http/server.ts";
-import ytdl from "npm:@distube/ytdl-core";
-import express from "npm:express@4.18.2";
+import { serve } from "https://deno.land/std/http/server.ts";
 
-const handler = async function(req: Request){
+const handler = async (req: Request) => {
+  const url = new URL(req.url);
+  const youtubeUrl = url.searchParams.get("url");
 
-var url=new URL(req.url);
-console.log(url.pathname)
+  if (youtubeUrl) {
+    try {
+      const process = Deno.run({
+        cmd: [
+          "python3",
+          "-m",
+          "yt_dlp",
+          "--get-url",
+          youtubeUrl
+        ],
+        stdout: "piped",
+        stderr: "piped",
+      });
 
-if(url.pathname.indexOf("/vid") > -1) {
-let id=url.searchParams.get("id");
-if(ytdl.validateID(id)){
+      const output = await process.output();
+      const errorOutput = await process.stderrOutput();
 
-let yt =await ytdl.getInfo(id); 
+      process.close();
 
-return new Response(`{"video":${JSON.stringify(yt.player_response.videoDetails)},"stream":${JSON.stringify(yt.player_response.streamingData)},"captions":${JSON.stringify(yt.player_response.captions) || "\"none\""}}`, { 
-status: 200,
-headers: {
-"content-type": "application/json; charset=utf-8",
-"Access-Control-Allow-Origin":"*",
-} 
-});
-}else{
-return new Response(`{"error":true}`, { 
-status: 404,
-headers: {
-"Content-Type": "application/json; charset=utf-8",
-"Access-Control-Allow-Origin":"*",
-} 
-});
-}  
-}
-else if(url.pathname.indexOf("audio") > -1 ){
-let id=url.searchParams.get("id");
-if(ytdl.validateID(id)){
+      const playbackUrl = new TextDecoder().decode(output).trim();
 
-let yt =await ytdl.getInfo(id); 
-let audioFormats = ytdl.filterFormats(yt.formats, 'audioonly');
-return new Response(`{"audio":${JSON.stringify(audioFormats)}}`, { 
-status: 200,
-headers: {
-"content-type": "application/json; charset=utf-8",
-"Access-Control-Allow-Origin":"*",
-} 
-});
-}else{
-return new Response(`{"error":true}`, { 
-status: 404,
-headers: {
-"Content-Type": "application/json; charset=utf-8",
-"Access-Control-Allow-Origin":"*",
-} 
-});
-}  
-
-} 
-else if(url.pathname=="/"){
-let index=await Deno.readTextFile("./index.html");
-  
-const body = new TextEncoder().encode(index);
-return new Response(body, { 
-status: 200,
-headers: {
-"content-type": "text/html; charset=utf-8",
-} 
-});
-}else{
-return new Response(`<h1>404 NOT FOUND BRUH 🤣🤣🤣🤣`, { 
-status: 404,
-headers: {
-"content-type": "text/html; charset=utf-8",
-} 
-});
-}
-  
+      if (playbackUrl) {
+        const redirectHtml = `
+          <meta http-equiv="refresh" content="0; url=${playbackUrl}" />
+          <p>Redirecting to playback URL: <a href="${playbackUrl}">${playbackUrl}</a></p>
+        `;
+        return new Response(redirectHtml, { headers: { "Content-Type": "text/html" } });
+      } else {
+        return new Response("Could not retrieve playback URL", { status: 400 });
+      }
+    } catch (e) {
+      console.error(e);
+      return new Response("Error occurred while fetching playback URL", { status: 500 });
+    }
+  } else {
+    return new Response("No URL provided. Use '?url=YOUTUBE_URL' in the query.", { status: 400 });
+  }
 };
 
-serve(handler);
+console.log("Server running on http://localhost:8000");
+await serve(handler);
